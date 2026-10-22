@@ -1,5 +1,5 @@
 # ESP32-Fardriver-translator
-EN: This code enables you to retrieve data from the Fardriver controller and transmit it to the web interface of your device. Default WI-FI name: Fardriver_Das, pass: password.
+EN: This code enables you to retrieve data from the Fardriver controller and transmit it to the web interface of your device. Default WI-FI name: Fardriver_Dash, pass: password.
 
 RU: Код который берет данные из контроллера Fardriver и передает из по WI-FI на веб интерфейс вашего устройства.
 По умолчанию точка доступа называется Fardriver_Dash, пароль: password.
@@ -15,7 +15,6 @@ const char* password = "password";
 
 WebServer server(80);
 
-// Тут кстати вся структура
 struct FardriverData {
   float voltage = 0;
   float lineCurrent = 0;
