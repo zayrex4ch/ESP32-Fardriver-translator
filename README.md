@@ -10,7 +10,7 @@ RU: Код который берет данные из контроллера Fa
 Releases of new versions will be located here in README.MD, and older versions will be in the branch with their version.txt.
 
 
-Code/Код: 
+Code/Код V2: 
 ```C++
 #include <WiFi.h>
 #include <WebServer.h>
