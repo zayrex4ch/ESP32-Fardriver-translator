@@ -1,14 +1,26 @@
 # ESP32-Fardriver-translator
+
 EN: This code enables you to retrieve data from the Fardriver controller and transmit it to the web interface of your device. Default WI-FI name: Fardriver_Dash, pass: password.
 
 RU: Код который берет данные из контроллера Fardriver и передает из по WI-FI на веб интерфейс вашего устройства.
 По умолчанию точка доступа называется Fardriver_Dash, пароль: password.
+
+релизы новых версий буду распологатся тут в README.MD а старые версии будут в ветке с их версией.txt
+
+Releases of new versions will be located here in README.MD, and older versions will be in the branch with their version.txt.
+
 
 Code/Код: 
 ```C++
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HardwareSerial.h>
+
+// === YOUR CONFIG ===
+const float WHEEL_CIRCUMFERENCE_M = 0.877; // Окружность 11-дюймового колеса M5 Pro (метры)
+const float BATTERY_MAX_V = 54.6;          // 100% заряда (13S)
+const float BATTERY_MIN_V = 39.0;          // 0% заряда (13S)
+// ==========================
 
 const char* ssid = "Fardriver_Dash";
 const char* password = "password"; 
@@ -75,8 +87,7 @@ void processPacket(uint8_t* packet, size_t length) {
     case 0xE8: {
       float new_voltage = ((pData[1] << 8) | pData[0]) / 10.0f;
       if (new_voltage >= 0 && new_voltage <= 150.0f) { controllerData.voltage = new_voltage; }
-      
-float new_lineCurrent = (int16_t)((pData[5] << 8) | pData[4]) / 4.0f;
+      float new_lineCurrent = (int16_t)((pData[5] << 8) | pData[4]) / 4.0f;
       if (new_lineCurrent >= -100.0f && new_lineCurrent <= 300.0f) {  
         controllerData.lineCurrent = new_lineCurrent;  
       }
@@ -91,50 +102,170 @@ float new_lineCurrent = (int16_t)((pData[5] << 8) | pData[4]) / 4.0f;
     case 0xF4: {
       int new_motorTemp = (int16_t)((pData[1] << 8) | pData[0]);
       if (new_motorTemp > -20 && new_motorTemp < 200) { controllerData.motorTemp = new_motorTemp; }
-      controllerData.soc = pData[3];
+      // SOC от Фарика игнорируем, считаем сами ниже!
       break;
     }
   }
   
-  const float wheel_circumference_m = 1.416;
-  const int motor_pole_pairs = 20;
-
-  int16_t displayRawRpm = (controllerData.rawRpm < 0) ? 0 : controllerData.rawRpm;
-  controllerData.rpm = displayRawRpm * 4.0 / motor_pole_pairs;
-  controllerData.speed = (controllerData.rpm * wheel_circumference_m * 60.0) / 1000.0;
+  // 1. Исправленная скорость (Фарик шлет реальные RPM, делить не надо)
+  controllerData.rpm = (controllerData.rawRpm < 0) ? 0 : controllerData.rawRpm;
+  controllerData.speed = (controllerData.rpm * WHEEL_CIRCUMFERENCE_M * 60.0) / 1000.0;
   
+  // 2. Исправленный SOC (свой собственный расчет по вольтажу)
+  if (controllerData.voltage >= BATTERY_MAX_V) {
+    controllerData.soc = 100;
+  } else if (controllerData.voltage <= BATTERY_MIN_V) {
+    controllerData.soc = 0;
+  } else {
+    controllerData.soc = (int)(((controllerData.voltage - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V)) * 100.0);
+  }
+
+  // 3. Мощность и таймер
   controllerData.power = controllerData.voltage * controllerData.lineCurrent;
   controllerData.lastUpdate = millis();
 }
 
+// Версия 2.0.1 HTML
 const char* htmlPage = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fardriver Ultimate Dash</title>
+  <title>Fardriver Ultimate Dash v2.0</title>
   <style>
-    body { background-color: #080a0f; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 10px; margin: 0; }
+    body { background-color: #080a0f; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: center; padding: 10px; margin: 0; }
     .header { display: flex; justify-content: space-between; align-items: center; background: #161b22; padding: 12px 20px; border-radius: 14px; border: 1px solid #30363d; max-width: 460px; margin: 0 auto 15px auto; }
-    .header h1 { font-size: 18px; color: #f0f6fc; margin: 0; }
-    .status-dot { width: 10px; height: 10px; background-color: #f85149; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #f85149; transition: 0.3s; }
-    .status-dot.active { background-color: #3fb950; box-shadow: 0 0 10px #3fb950; }
+    .header h1 { font-size: 18px; color: #f0f6fc; margin: 0; display: flex; align-items: center; gap: 10px; }
     
+    .status-dot { width: 10px; height: 10px; background-color: #f85149; border-radius: 50%; box-shadow: 0 0 8px #f85149; transition: 0.3s; }
+    .status-dot.active { background-color: #3fb950; box-shadow: 0 0 10px #3fb950; }
+    .btn-settings { background: none; border: none; font-size: 20px; cursor: pointer; color: #8b949e; transition: 0.2s; }
+    .btn-settings:hover { color: #f0f6fc; }
+    .top-right { display: flex; align-items: center; gap: 15px; }
+
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 500px; margin: 0 auto; }
-    .card { background: #161b22; padding: 15px; border-radius: 14px; border: 1px solid #30363d; text-align: left; position: relative; overflow: hidden; }
+    .card { background: #161b22; padding: 15px; border-radius: 14px; border: 1px solid #30363d; text-align: left; transition: display 0.3s; }
     .card label { display: block; color: #8b949e; font-size: 11px; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; letter-spacing: 0.5px; }
     .card span { font-size: 24px; font-weight: 700; color: #58a6ff; }
     .card.accent span { color: #3fb950; }
     .card.warning span { color: #d29922; }
-    
     .big-card { grid-column: span 2; background: linear-gradient(135deg, #161b22 0%, #1f242c 100%); padding: 20px; text-align: center; }
     .big-card span { font-size: 48px; color: #58a6ff; }
     .unit { font-size: 16px; color: #8b949e; font-weight: normal; }
     
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
+    .modal-content { background: #161b22; padding: 20px; border-radius: 14px; border: 1px solid #30363d; width: 85%; max-width: 350px; text-align: left; }
+    .modal-content h2 { margin-top: 0; color: #f0f6fc; font-size: 18px; margin-bottom: 15px; }
+    .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #30363d; }
+    .toggle-row:last-child { border-bottom: none; }
+    .close-btn { width: 100%; padding: 10px; margin-top: 15px; background: #238636; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+    
+    .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #30363d; transition: .4s; border-radius: 20px; }
+    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: #8b949e; transition: .4s; border-radius: 50%; }
+    input:checked + .slider { background-color: #238636; }
+    input:checked + .slider:before { transform: translateX(20px); background-color: #fff; }
+
     .footer { margin-top: 15px; color: #484f58; font-size: 12px; }
   </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🛴 Dash v2.0</h1>
+    <div class="top-right">
+      <span id="statusDot" class="status-dot"></span>
+      <button class="btn-settings" onclick="openSettings()">⚙️</button>
+    </div>
+  </div>
+
+  <div class="grid" id="dashGrid">
+    <div class="card big-card" id="card_speed">
+      <label>Скорость</label>
+      <span id="speed">0.0</span><span class="unit" style="font-size:24px"> km/h</span>
+    </div>
+    <div class="card accent" id="card_volt">
+      <label>Напряжение</label>
+      <span id="volt">-- V</span>
+    </div>
+    <div class="card warning" id="card_current">
+      <label>Ток</label>
+      <span id="current">-- A</span>
+    </div>
+    <div class="card" id="card_power">
+      <label>Мощность</label>
+      <span id="power">-- W</span>
+    </div>
+    <div class="card" id="card_soc">
+      <label>Заряд (SOC)</label>
+      <span id="soc">-- %</span>
+    </div>
+    <div class="card" id="card_ctemp">
+      <label>Т. Контроллера</label>
+      <span id="c_temp">-- °C</span>
+    </div>
+    <div class="card" id="card_mtemp">
+      <label>Т. Мотора</label>
+      <span id="m_temp">-- °C</span>
+    </div>
+  </div>
+
+  <div class="footer">ESP32 Direct UART Bridge</div>
+
+  <div class="modal" id="settingsModal">
+    <div class="modal-content">
+      <h2>Настройки дашборда</h2>
+      <div id="togglesContainer"></div>
+      <button class="close-btn" onclick="closeSettings()">Готово</button>
+    </div>
+  </div>
+
   <script>
+    const widgets = [
+      { id: 'card_speed', name: 'Скорость (Main)' },
+      { id: 'card_volt', name: 'Напряжение' },
+      { id: 'card_current', name: 'Ток' },
+      { id: 'card_power', name: 'Мощность' },
+      { id: 'card_soc', name: 'Заряд (SOC)' },
+      { id: 'card_ctemp', name: 'Т. Контроллера' },
+      { id: 'card_mtemp', name: 'Т. Мотора' }
+    ];
+
+    function initSettings() {
+      let container = document.getElementById('togglesContainer');
+      widgets.forEach(w => {
+        let isVisible = localStorage.getItem(w.id) !== 'hidden';
+        if (!isVisible) document.getElementById(w.id).style.display = 'none';
+
+        container.innerHTML += `
+          <div class="toggle-row">
+            <span style="color:#c9d1d9; font-size:14px;">${w.name}</span>
+            <label class="switch">
+              <input type="checkbox" id="toggle_${w.id}" ${isVisible ? 'checked' : ''} onchange="toggleCard('${w.id}')">
+              <span class="slider"></span>
+            </label>
+          </div>
+        `;
+      });
+    }
+
+    function toggleCard(id) {
+      let cb = document.getElementById('toggle_' + id);
+      if (cb.checked) {
+        document.getElementById(id).style.display = 'block';
+        localStorage.setItem(id, 'visible');
+      } else {
+        document.getElementById(id).style.display = 'none';
+        localStorage.setItem(id, 'hidden');
+      }
+    }
+
+    function openSettings() { document.getElementById('settingsModal').style.display = 'flex'; }
+    function closeSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+
+    initSettings();
+
     setInterval(function() {
       fetch('/json').then(response => response.json()).then(data => {
         document.getElementById("volt").innerHTML = data.volt.toFixed(1) + '<span class="unit"> V</span>';
@@ -146,59 +277,13 @@ const char* htmlPage = R"rawliteral(
         document.getElementById("soc").innerHTML = data.soc + '<span class="unit"> %</span>';
         
         let dot = document.getElementById("statusDot");
-        if (data.online) {
-          dot.classList.add("active");
-        } else {
-          dot.classList.remove("active");
-        }
+        if (data.online) dot.classList.add("active");
+        else dot.classList.remove("active");
+      }).catch(e => {
+        document.getElementById("statusDot").classList.remove("active");
       });
     }, 250); 
   </script>
-</head>
-<body>
-  <div class="header">
-    <h1>Fardriver Dash</h1>
-    <div><span id="statusDot" class="status-dot"></span></div>
-  </div>
-
-  <div class="grid">
-    <div class="card big-card">
-      <label>Speed</label>
-      <span id="speed">0.0</span><span class="unit" style="font-size:24px"> km/h</span>
-    </div>
-
-    <div class="card accent">
-      <label>Voltage</label>
-      <span id="volt">-- V</span>
-    </div>
-    
-    <div class="card warning">
-      <label>Current</label>
-      <span id="current">-- A</span>
-    </div>
-
-    <div class="card">
-      <label>Power</label>
-      <span id="power">-- W</span>
-    </div>
-
-    <div class="card">
-      <label>Charge (SOC)</label>
-      <span id="soc">-- %</span>
-    </div>
-
-    <div class="card">
-      <label>T° Contoller</label>
-      <span id="c_temp">-- °C</span>
-    </div>
-
-    <div class="card">
-      <label>T° Motors</label>
-      <span id="m_temp">-- °C</span>
-    </div>
-  </div>
-
-  <div class="footer">ESP32 Direct UART Bridge</div>
 </body>
 </html>
 )rawliteral";
@@ -212,8 +297,7 @@ void setup() {
   server.on("/", []() { server.send(200, "text/html", htmlPage); });
   
   server.on("/json", []() {
-    bool isOnline = (millis() - controllerData.lastUpdate < 2000);
-
+    bool isOnline = (millis() - controllerData.lastUpdate < 2000); 
     String json = "{";
     json += "\"volt\":" + String(controllerData.voltage) + ",";
     json += "\"current\":" + String(controllerData.lineCurrent) + ",";
@@ -263,4 +347,5 @@ void loop() {
     }
   }
 }
+
 ```
