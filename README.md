@@ -17,9 +17,9 @@ Code/Код V2:
 #include <HardwareSerial.h>
 
 // === YOUR CONFIG ===
-const float WHEEL_CIRCUMFERENCE_M = 0.877; // Окружность 11-дюймового колеса M5 Pro (метры)
-const float BATTERY_MAX_V = 54.6;          // 100% заряда (13S)
-const float BATTERY_MIN_V = 39.0;          // 0% заряда (13S)
+const float WHEEL_CIRCUMFERENCE_M = 0.877; // paras your vheel (metre)
+const float BATTERY_MAX_V = 54.6;          // max voltage Battery 
+const float BATTERY_MIN_V = 39.0;          // min voltage Battery
 // ==========================
 
 const char* ssid = "Fardriver_Dash";
