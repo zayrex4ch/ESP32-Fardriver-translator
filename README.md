@@ -17,7 +17,8 @@ Code/Код V2:
 #include <HardwareSerial.h>
 
 // === YOUR CONFIG ===
-const float WHEEL_CIRCUMFERENCE_M = 0.877; // paras your vheel (metre)
+const float SPEED_DIVIDER = 5.0; // (test) 
+const float WHEEL_CIRCUMFERENCE_M = 0.877; // parameters of your wheel (metre)
 const float BATTERY_MAX_V = 54.6;          // max voltage Battery 
 const float BATTERY_MIN_V = 39.0;          // min voltage Battery
 // ==========================
@@ -102,16 +103,14 @@ void processPacket(uint8_t* packet, size_t length) {
     case 0xF4: {
       int new_motorTemp = (int16_t)((pData[1] << 8) | pData[0]);
       if (new_motorTemp > -20 && new_motorTemp < 200) { controllerData.motorTemp = new_motorTemp; }
-      // SOC от Фарика игнорируем, считаем сами ниже!
+      // SOC от Фарика игнорируется
       break;
     }
   }
-  
-  // 1. Исправленная скорость (Фарик шлет реальные RPM, делить не надо)
-  controllerData.rpm = (controllerData.rawRpm < 0) ? 0 : controllerData.rawRpm;
+    int16_t displayRawRpm = (controllerData.rawRpm < 0) ? 0 : controllerData.rawRpm;
+  controllerData.rpm = displayRawRpm / SPEED_DIVIDER;
   controllerData.speed = (controllerData.rpm * WHEEL_CIRCUMFERENCE_M * 60.0) / 1000.0;
-  
-  // 2. Исправленный SOC (свой собственный расчет по вольтажу)
+
   if (controllerData.voltage >= BATTERY_MAX_V) {
     controllerData.soc = 100;
   } else if (controllerData.voltage <= BATTERY_MIN_V) {
@@ -119,20 +118,16 @@ void processPacket(uint8_t* packet, size_t length) {
   } else {
     controllerData.soc = (int)(((controllerData.voltage - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V)) * 100.0);
   }
-
-  // 3. Мощность и таймер
   controllerData.power = controllerData.voltage * controllerData.lineCurrent;
   controllerData.lastUpdate = millis();
 }
-
-// Версия 2.0.1 HTML
 const char* htmlPage = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fardriver Ultimate Dash v2.0</title>
+  <title>Fardriver Dash v2.1</title>
   <style>
     body { background-color: #080a0f; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: center; padding: 10px; margin: 0; }
     .header { display: flex; justify-content: space-between; align-items: center; background: #161b22; padding: 12px 20px; border-radius: 14px; border: 1px solid #30363d; max-width: 460px; margin: 0 auto 15px auto; }
@@ -173,7 +168,7 @@ const char* htmlPage = R"rawliteral(
 </head>
 <body>
   <div class="header">
-    <h1>🛴 Dash v2.0</h1>
+    <h1>Fardriver Dash v2.1</h1>
     <div class="top-right">
       <span id="statusDot" class="status-dot"></span>
       <button class="btn-settings" onclick="openSettings()">⚙️</button>
